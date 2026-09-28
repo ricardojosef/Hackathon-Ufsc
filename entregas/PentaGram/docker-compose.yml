@@ -1,0 +1,28 @@
+# Ambiente de análise — rodar da raiz do repositório:
+#
+#   docker compose build                    # primeira vez (~3 min)
+#   docker compose run --rm analyzer bash   # shell interativo
+#
+# Os alvos são montados nos MESMOS paths do ambiente oficial da organização
+# (/repos/python e /repos/php), de propósito: todos os exemplos de comando em
+# docs/ferramentas.md funcionam sem tradução de path.
+
+services:
+  analyzer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      # Alvos de análise — read-only. Não editamos o código que analisamos.
+      - ./fixtures/bad-codebase-python:/repos/python:ro
+      - ./fixtures/bad-codebase:/repos/php:ro
+      # Nosso código: o repositório inteiro, leitura/escrita.
+      # Edite no host com seu editor; aparece no container na hora.
+      - .:/workspace
+    working_dir: /workspace
+    environment:
+      # Opcional — só para enriquecer descrições via Gemini.
+      # Defina em .env na raiz (veja .env.example). O pipeline deve rodar sem.
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+    stdin_open: true
+    tty: true

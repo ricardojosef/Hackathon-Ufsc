@@ -1,0 +1,47 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build / coverage
+htmlcov/
+.coverage
+dist/
+build/
+*.egg-info/
+# Output bruto das ferramentas de análise (bandit.json, radon-cc.json, ...).
+# Scratch — o relatório final versionado é gerado pelo pipeline, não isto.
+output/
+*.sqlite
+*.sqlite3
+*.db
+
+# Artefatos gerados dentro dos fixtures, caso alguém rode os alvos localmente.
+# Os fixtures devem permanecer byte-idênticos ao upstream — veja fixtures/README.md.
+fixtures/bad-codebase/vendor/
+fixtures/bad-codebase/node_modules/
+fixtures/bad-codebase/storage/*.key
+fixtures/bad-codebase/storage/logs/*.log
+fixtures/bad-codebase/storage/framework/cache/*
+fixtures/bad-codebase/storage/framework/sessions/*
+fixtures/bad-codebase/storage/framework/views/*
+fixtures/bad-codebase/bootstrap/cache/*
