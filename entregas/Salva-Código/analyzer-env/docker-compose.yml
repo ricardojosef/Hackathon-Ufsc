@@ -1,0 +1,15 @@
+services:
+  analyzer:
+    build: .
+    volumes:
+      # repositório Python a analisar (read-only — os alunos não editam o alvo)
+      - ../bad-codebase-python:/repos/python:ro
+      # repositório PHP a analisar (bônus, read-only)
+      - ../bad-codebase:/repos/php:ro
+      # pasta onde os alunos desenvolvem o pipeline (leitura/escrita)
+      - ./workspace:/workspace
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    # Para entrar no container interativamente:
+    #   docker compose run --rm analyzer bash

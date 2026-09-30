@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.sqlite
+*.sqlite3
+
+# PHP / Laravel
+/bad-codebase/vendor/
+/bad-codebase/node_modules/
+/bad-codebase/storage/*.key
+/bad-codebase/storage/logs/*.log
+/bad-codebase/storage/framework/cache/*
+/bad-codebase/storage/framework/sessions/*
+/bad-codebase/storage/framework/views/*
+/bad-codebase/bootstrap/cache/*
+
+# Saída do pipeline (relatórios gerados) e cache de enriquecimento por IA
+/out/
+/analyzer-env/workspace/out/
+.enrich-cache.json
+
+# Ambiente
+.DS_Store
+.idea/
+.vscode/
+*.log

@@ -1,0 +1,77 @@
+# Perfil de negócio da HourTrack Ltda.
+#
+# Todo número que influencia o scoring mora aqui, com a fonte no
+# business-context.md. Trocar de empresa = trocar este arquivo, sem tocar
+# em scoring.py.
+#
+# IMPORTANTE (determinismo): os prazos são expressos em DIAS RESTANTES fixos,
+# não em datas de calendário. Se o pipeline calculasse "faltam 14 dias" com
+# datetime.now(), rodar amanhã mudaria o score — e o briefing desclassifica
+# scoring não-determinístico.
+
+[empresa]
+nome = "HourTrack Ltda."
+mrr_brl = 28000
+clientes_ativos = 47
+usuarios = 180
+
+[time]
+# business-context.md: "2 devs, capacidade real ~6 story points por semana"
+devs = 2
+capacidade_sp_semana = 6
+tem_qa = false
+tem_devops = false
+# "O desenvolvedor que escreveu 90% do código sai em 6 semanas"
+saida_dev_principal_semanas = 6
+
+[pressoes.release_v21]
+# "Release v2.1 em 14 dias — dois clientes ameaçaram cancelar se não entregar"
+dias_restantes = 14
+bloqueante = true
+# 14 dias ÷ 7 × 6 SP = 12 SP. Este é o orçamento REAL até a release.
+orcamento_sp = 12
+# Arquivos que a nova funcionalidade ("relatório por projeto") vai tocar.
+# Mexer neles já é obrigatório, então o custo marginal de corrigir é menor.
+arquivos_afetados = [
+    "app/routes/report_routes.py",
+    "app/services/billing_service.py",
+    "app/Http/Controllers/ReportController.php",
+    "app/Services/BillingService.php",
+]
+
+[pressoes.questionario_seguranca]
+# "Cliente enterprise pediu questionário de segurança — respostas em 30 dias.
+#  Se fechar, dobra o MRR."
+dias_restantes = 30
+contrato_mensal_brl = 8000
+usuarios = 200
+# 30 dias ÷ 7 × 6 SP ≈ 25 SP, menos o que a release consome.
+orcamento_sp = 24
+
+[pressoes.concentracao_receita]
+# "3 dos 47 clientes respondem por 60% da receita"
+clientes_criticos = 3
+percentual_receita = 60
+
+[riscos]
+# Restrições técnicas que amplificam a consequência de qualquer erro.
+sem_staging = true
+sem_backup = true
+sem_testes = true
+sem_monitoramento = true
+deploy_manual_em_producao = true
+banco_commitado_no_repo = true
+# "processa dados de contratos — vazamento poderia gerar processo"
+dados_sensiveis = true
+
+# Mapeamento das 7 perguntas do security-questionnaire.md para as regras
+# canônicas que as respondem. Um achado que casa aqui é um "Não" que o time
+# comercial vai ter que justificar em 30 dias.
+[questionario]
+q1 = { pergunta = "O sistema é protegido contra SQL Injection?", regras = ["SEC.SQLI"] }
+q2 = { pergunta = "O sistema é protegido contra XSS?", regras = ["SEC.XSS"] }
+q3 = { pergunta = "As senhas usam hash seguro (bcrypt/PBKDF2/Argon2)?", regras = ["SEC.WEAK_HASH", "SEC.DEFAULT_PASSWORD"] }
+q4 = { pergunta = "Credenciais e API keys estão fora do código-fonte?", regras = ["SEC.HARDCODED_SECRET"] }
+q5 = { pergunta = "O repositório não contém .env com valores reais?", regras = ["SEC.COMMITTED_SECRET_FILE"] }
+q6 = { pergunta = "O modo debug está desativado em produção?", regras = ["SEC.DEBUG_ON"] }
+q7 = { pergunta = "O código não usa MD5/SHA-1 para dados sensíveis?", regras = ["SEC.WEAK_HASH"] }

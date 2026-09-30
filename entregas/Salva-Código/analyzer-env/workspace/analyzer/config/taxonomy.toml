@@ -1,0 +1,510 @@
+# Taxonomia canônica de débitos técnicos.
+#
+# Duas seções:
+#   [rules.*]   — o catálogo canônico. Categoria, severidade base, esforço,
+#                 tags de negócio e texto de remediação de cada regra.
+#   [mapping.*] — tradução "ferramenta:id_nativo" -> regra canônica.
+#
+# Por que isto é dado e não código: adicionar uma ferramenta nova (semgrep,
+# phpstan) é acrescentar linhas em [mapping], sem tocar no scoring model.
+# É o que faz o bônus PHP funcionar com o MESMO scoring.
+#
+# Campo `esforco_sp`: story points para corrigir, na escala do time
+# (~6 SP/semana para os 2 devs). Estimativa por padrão, não por ocorrência.
+#
+# Tags reconhecidas pelo scoring (ver scoring.py):
+#   multi-tenant  — permite acessar/alterar dados de outro cliente
+#   pii           — expõe dado pessoal ou de contrato
+#   data-loss     — pode destruir dados (agravado por: sem backup, sem staging)
+#   bus-factor    — conhecimento concentrado no dev que sai em 6 semanas
+#   auth          — autenticação/autorização
+#   correctness   — resultado errado sem erro visível (silencioso)
+
+# ─────────────────────────── SEGURANÇA ───────────────────────────
+
+[rules."SEC.SQLI"]
+categoria = "Segurança"
+nome = "SQL Injection por interpolação de string"
+severidade = "CRITICAL"
+esforco_sp = 3
+tags = ["multi-tenant", "pii", "data-loss"]
+descricao = """Parâmetros vindos da requisição são concatenados diretamente no SQL \
+via f-string, sem query parametrizada. Um atacante controla a cláusula WHERE e \
+consegue ler ou destruir dados de qualquer cliente da base."""
+remediacao = "Trocar as f-strings por placeholders `?` com tupla de parâmetros — a própria base de código já faz isso corretamente em outros pontos."
+
+[rules."SEC.HARDCODED_SECRET"]
+categoria = "Segurança"
+nome = "Credenciais de produção hardcoded no código-fonte"
+severidade = "CRITICAL"
+esforco_sp = 2
+tags = ["pii", "auth"]
+descricao = """Tokens de API, chaves e senhas de serviços de produção estão \
+escritos literalmente no código e versionados no Git. Qualquer pessoa com acesso \
+ao repositório — incluindo o dev que está saindo — mantém acesso aos sistemas."""
+remediacao = "Mover para variáveis de ambiente, rotacionar TODAS as chaves expostas (elas já estão no histórico do Git) e adicionar verificação em CI."
+
+[rules."SEC.WEAK_HASH"]
+categoria = "Segurança"
+nome = "Hash criptograficamente quebrado para senhas"
+severidade = "CRITICAL"
+esforco_sp = 3
+tags = ["auth", "pii"]
+descricao = """Senhas de usuário são armazenadas com MD5 sem salt. MD5 é \
+quebrado desde 2004; senhas comuns são revertidas em segundos por rainbow table."""
+remediacao = "Migrar para bcrypt/Argon2 com re-hash no próximo login bem-sucedido, mantendo compatibilidade durante a transição."
+
+[rules."SEC.NO_AUTHZ"]
+categoria = "Segurança"
+nome = "Rotas sem autenticação ou controle de acesso"
+severidade = "CRITICAL"
+esforco_sp = 8
+tags = ["auth", "multi-tenant", "pii", "data-loss"]
+descricao = """As rotas não verificam identidade nem propriedade do recurso. \
+Qualquer visitante lê, cria e apaga dados de qualquer cliente — inclusive por \
+requisição GET, o que permite exclusão acidental por um crawler."""
+remediacao = "Introduzir sessão autenticada + verificação de tenant por recurso. Como primeiro passo de baixo custo, exigir POST/DELETE nas rotas destrutivas."
+
+[rules."SEC.DEBUG_ON"]
+categoria = "Segurança"
+nome = "Modo debug habilitado em produção"
+severidade = "HIGH"
+esforco_sp = 0.5
+tags = ["pii"]
+descricao = """A aplicação sobe com debug ligado. Qualquer exceção devolve \
+stack trace com trechos de código e valores de variáveis; o debugger do \
+Werkzeug ainda expõe um console remoto."""
+remediacao = "Ler o flag de uma variável de ambiente, com `False` como padrão."
+
+[rules."SEC.XSS"]
+categoria = "Segurança"
+nome = "Cross-Site Scripting por HTML montado à mão"
+severidade = "HIGH"
+esforco_sp = 5
+tags = ["pii"]
+descricao = """O HTML é montado por concatenação de f-strings com dados vindos \
+do banco, sem escape. Um nome de cliente contendo <script> executa no navegador \
+de todos os usuários que abrirem o dashboard."""
+remediacao = "Renderizar via Jinja2 (autoescape ligado por padrão) em vez de concatenar strings."
+
+[rules."SEC.DEFAULT_PASSWORD"]
+categoria = "Segurança"
+nome = "Senha padrão previsível para novos usuários"
+severidade = "HIGH"
+esforco_sp = 1
+tags = ["auth"]
+descricao = """Usuários criados sem senha recebem um valor fixo e trivial \
+definido como constante no código."""
+remediacao = "Gerar senha aleatória por usuário e forçar troca no primeiro acesso."
+
+[rules."SEC.SENSITIVE_DATA_EXPOSURE"]
+categoria = "Segurança"
+nome = "Dados sensíveis expostos em consulta ampla"
+severidade = "HIGH"
+esforco_sp = 2
+tags = ["pii", "multi-tenant"]
+descricao = """`SELECT *` em tabelas que contêm hash de senha, com o resultado \
+passando direto para a camada de apresentação — o hash entra no objeto de \
+resposta sem ninguém perceber."""
+remediacao = "Listar colunas explicitamente nas queries e nunca selecionar a coluna de senha fora do fluxo de login."
+
+[rules."SEC.SECRET_IN_LOG"]
+categoria = "Segurança"
+nome = "Credencial gravada em log"
+severidade = "HIGH"
+esforco_sp = 0.5
+tags = ["pii", "auth"]
+descricao = """Em caso de falha, a mensagem de erro imprime a URL com o token \
+de API em texto plano, vazando a credencial para qualquer lugar que colete logs."""
+remediacao = "Remover o segredo da mensagem; logar apenas o host e o código de status."
+
+[rules."SEC.COMMITTED_SECRET_FILE"]
+categoria = "Segurança"
+nome = "Arquivo de credenciais ou banco commitado no repositório"
+severidade = "HIGH"
+esforco_sp = 2
+tags = ["pii", "data-loss"]
+descricao = """Arquivos `.env` com valores reais e/ou o próprio banco SQLite \
+de produção estão versionados no Git."""
+remediacao = "Remover do índice, adicionar ao .gitignore, rotacionar credenciais e limpar o histórico."
+
+[rules."SEC.UNVERIFIED_REQUEST"]
+categoria = "Segurança"
+nome = "Chamada HTTP a serviço externo sem verificar a resposta"
+severidade = "MEDIUM"
+esforco_sp = 2
+tags = ["correctness"]
+descricao = """Requisições a APIs externas (contabilidade, push, SMS) ignoram \
+completamente o status da resposta e engolem exceções."""
+remediacao = "Verificar o status, tratar falha explicitamente e registrar o resultado."
+
+# ─────────────────────────── ARQUITETURA ───────────────────────────
+
+[rules."ARCH.NO_TESTS"]
+categoria = "Arquitetura"
+nome = "Ausência total de testes automatizados"
+severidade = "HIGH"
+esforco_sp = 8
+tags = ["bus-factor", "correctness"]
+descricao = """O projeto declara pytest como dependência mas não possui um \
+único teste. Sem staging e com deploy direto em produção, não existe rede de \
+proteção alguma para mudanças."""
+remediacao = "Cobrir primeiro o cálculo de faturamento e o helper de datas — é onde um erro vira cobrança errada ao cliente."
+
+[rules."ARCH.GOD_MODULE"]
+categoria = "Arquitetura"
+nome = "Módulo monolítico concentrando todas as responsabilidades"
+severidade = "MEDIUM"
+esforco_sp = 13
+tags = ["bus-factor"]
+descricao = """Um único arquivo acumula rotas, acesso a banco, regra de \
+negócio e template HTML. Qualquer mudança exige entender o arquivo inteiro."""
+remediacao = "Extrair em blueprints, repositório e templates — incrementalmente, começando pelo que a v2.1 for tocar."
+
+[rules."ARCH.BUSINESS_LOGIC_IN_VIEW"]
+categoria = "Arquitetura"
+nome = "Regra de negócio embutida na camada de apresentação"
+severidade = "MEDIUM"
+esforco_sp = 5
+tags = ["correctness"]
+descricao = """O cálculo de valores é refeito dentro da montagem do HTML, em \
+paralelo ao cálculo já feito na camada de dados — duas fontes de verdade para \
+o mesmo número."""
+remediacao = "Calcular uma vez na camada de serviço e apenas exibir na view."
+
+[rules."ARCH.DB_IN_MODEL"]
+categoria = "Arquitetura"
+nome = "Acesso direto ao banco dentro do model"
+severidade = "MEDIUM"
+esforco_sp = 5
+tags = []
+descricao = """Models abrem conexão própria com o banco dentro de métodos de \
+instância, o que garante N+1 sempre que uma lista de objetos é percorrida."""
+remediacao = "Mover as consultas para uma camada de repositório que aceita a conexão por parâmetro."
+
+[rules."ARCH.NO_API_VERSIONING"]
+categoria = "Arquitetura"
+nome = "API pública sem versionamento"
+severidade = "LOW"
+esforco_sp = 2
+tags = []
+descricao = """Endpoints expostos sem prefixo de versão. Qualquer mudança de \
+contrato quebra integrações de clientes sem caminho de migração."""
+remediacao = "Prefixar com /api/v1 e manter o caminho antigo como alias por um período."
+
+# ─────────────────────────── DESIGN ───────────────────────────
+
+[rules."DESIGN.SWALLOWED_EXCEPTION"]
+categoria = "Design"
+nome = "Exceções engolidas silenciosamente"
+severidade = "HIGH"
+esforco_sp = 3
+tags = ["correctness", "data-loss"]
+descricao = """Blocos `except` com `pass` escondem falhas reais. Faturas são \
+calculadas e não persistidas, notificações não são enviadas, e nada disso \
+aparece em lugar nenhum — sem monitoramento, a empresa só descobre pelo cliente."""
+remediacao = "Registrar a exceção e propagar, ou tratar explicitamente cada caso conhecido."
+
+[rules."DESIGN.SILENT_FAILURE"]
+categoria = "Design"
+nome = "Falha silenciosa por retorno sentinela"
+severidade = "MEDIUM"
+esforco_sp = 3
+tags = ["correctness"]
+descricao = """Funções devolvem None ou -1 em caso de erro, valores \
+indistinguíveis de um resultado legítimo. O erro se propaga silenciosamente \
+até virar um número errado no relatório do cliente."""
+remediacao = "Lançar exceção específica ou devolver um tipo Result explícito."
+
+[rules."DESIGN.MISSING_TABLE"]
+categoria = "Design"
+nome = "Escrita em tabela inexistente com exceção suprimida"
+severidade = "HIGH"
+esforco_sp = 2
+tags = ["correctness", "data-loss"]
+descricao = """O código insere em tabelas que não existem no schema e captura \
+a exceção com `pass`. A operação aparenta sucesso, mas o dado nunca é gravado."""
+remediacao = "Criar as tabelas via migração ou remover o código morto — hoje ele é pura ilusão de persistência."
+
+[rules."DESIGN.INCONSISTENT_INTERFACE"]
+categoria = "Design"
+nome = "Método homônimo com contrato divergente entre classes"
+severidade = "MEDIUM"
+esforco_sp = 3
+tags = ["correctness"]
+descricao = """O mesmo nome de método devolve formatos diferentes em cada \
+classe. Código que trata as entidades de forma uniforme produz saída \
+inconsistente sem lançar erro."""
+remediacao = "Definir o contrato numa interface/protocolo comum e padronizar as implementações."
+
+[rules."DESIGN.DUPLICATED_LOGIC"]
+categoria = "Design"
+nome = "Lógica duplicada com implementações divergentes"
+severidade = "MEDIUM"
+esforco_sp = 5
+tags = ["correctness", "bus-factor"]
+descricao = """A mesma regra existe em duas ou mais versões que já divergiram \
+entre si. Corrigir um bug em uma delas deixa as outras erradas."""
+remediacao = "Consolidar numa única implementação e apontar todos os chamadores para ela."
+
+[rules."DESIGN.MAGIC_NUMBER"]
+categoria = "Design"
+nome = "Regra de negócio expressa em valor mágico"
+severidade = "MEDIUM"
+esforco_sp = 2
+tags = ["correctness"]
+descricao = """Percentuais de desconto, multas e tarifas aparecem como \
+literais no meio do código, inclusive com nomes de clientes específicos \
+embutidos em condicionais."""
+remediacao = "Mover para configuração ou tabela, com o nome do cliente como dado e não como código."
+
+# ─────────────────────────── PERFORMANCE ───────────────────────────
+
+[rules."PERF.NPLUS1"]
+categoria = "Performance"
+nome = "Consulta ao banco dentro de laço (N+1)"
+severidade = "HIGH"
+esforco_sp = 3
+tags = []
+descricao = """Para cada registro listado, o código dispara consultas \
+adicionais. O custo cresce linearmente com o volume de lançamentos, num VPS \
+de 2GB sem cache e sem paginação."""
+remediacao = "Substituir por um único JOIN, ou pré-carregar as entidades relacionadas num dicionário."
+
+[rules."PERF.UNBOUNDED_QUERY"]
+categoria = "Performance"
+nome = "Listagem sem paginação nem limite"
+severidade = "MEDIUM"
+esforco_sp = 3
+tags = []
+descricao = """Consultas carregam a tabela inteira em memória e renderizam \
+todas as linhas. O próprio código tem um TODO admitindo a falta de paginação."""
+remediacao = "Paginar no SQL com LIMIT/OFFSET e paginar também na interface."
+
+[rules."PERF.REPEATED_CONNECTION"]
+categoria = "Performance"
+nome = "Conexão ao banco aberta por chamada, sem pool nem fechamento garantido"
+severidade = "MEDIUM"
+esforco_sp = 3
+tags = ["data-loss"]
+descricao = """Cada função abre sua própria conexão sem context manager. \
+Conexões vazam sob erro e, em SQLite, escritas concorrentes disputam lock de \
+arquivo."""
+remediacao = "Centralizar a conexão no ciclo de vida da requisição e usar context manager."
+
+[rules."PERF.QUADRATIC_REPORT"]
+categoria = "Performance"
+nome = "Relatório que multiplica consultas já custosas"
+severidade = "MEDIUM"
+esforco_sp = 5
+tags = []
+descricao = """Um relatório itera meses chamando uma rotina que, por sua vez, \
+já faz uma consulta por cliente — cada uma com seu próprio N+1 aninhado."""
+remediacao = "Agregar por SQL numa única consulta com GROUP BY."
+
+# ─────────────────────────── MANUTENIBILIDADE ───────────────────────────
+
+[rules."MAINT.HIGH_COMPLEXITY"]
+categoria = "Manutenibilidade"
+nome = "Função com complexidade ciclomática muito alta"
+severidade = "HIGH"
+esforco_sp = 5
+tags = ["bus-factor", "correctness"]
+descricao = """Funções com dezenas de caminhos independentes, sem nenhum teste \
+cobrindo os ramos. Cada alteração é feita às cegas."""
+remediacao = "Quebrar por responsabilidade (uma função por ação) e cobrir com testes antes de refatorar."
+
+[rules."MAINT.STRINGLY_TYPED_DISPATCH"]
+categoria = "Manutenibilidade"
+nome = "Despacho por string com falha silenciosa no caso desconhecido"
+severidade = "MEDIUM"
+esforco_sp = 3
+tags = ["correctness"]
+descricao = """Funções recebem uma string de 'ação' e ramificam numa cadeia de \
+if/elif, retornando None quando a ação não é reconhecida — erro de digitação \
+vira comportamento silencioso."""
+remediacao = "Trocar por funções nomeadas ou dicionário de despacho, com erro explícito no default."
+
+[rules."MAINT.DEAD_CODE"]
+categoria = "Manutenibilidade"
+nome = "Código morto: variáveis calculadas e nunca usadas"
+severidade = "LOW"
+esforco_sp = 1
+tags = []
+descricao = """Variáveis são atribuídas e jamais lidas, sugerindo lógica \
+removida pela metade ou intenção abandonada."""
+remediacao = "Remover. O histórico do Git preserva o que foi tirado."
+
+[rules."MAINT.FIXME"]
+categoria = "Manutenibilidade"
+nome = "Pendência assumida no código (TODO/FIXME)"
+severidade = "LOW"
+esforco_sp = 1
+tags = []
+descricao = """Comentários marcando trabalho reconhecidamente inacabado, sem \
+rastreamento em backlog."""
+remediacao = "Converter em item de backlog ou resolver."
+
+[rules."MAINT.BROAD_EXCEPT"]
+categoria = "Manutenibilidade"
+nome = "Captura genérica de exceção"
+severidade = "LOW"
+esforco_sp = 2
+tags = []
+descricao = """`except Exception` sem discriminar o erro esperado, capturando \
+inclusive falhas de programação."""
+remediacao = "Capturar as exceções específicas que se sabe tratar."
+
+[rules."MAINT.LINT_SMELL"]
+categoria = "Manutenibilidade"
+nome = "Smells gerais reportados pelo linter"
+severidade = "LOW"
+esforco_sp = 2
+tags = []
+descricao = """Conjunto de avisos de linter: imports não usados, variáveis \
+redefinidas, nomes fora de convenção."""
+remediacao = "Rodar o linter no CI e tratar como bloqueante para código novo."
+
+[rules."MAINT.TYPE_ERROR"]
+categoria = "Manutenibilidade"
+nome = "Erro de tipo ou símbolo detectado por análise estática"
+severidade = "MEDIUM"
+esforco_sp = 3
+tags = ["correctness"]
+descricao = """A análise estática aponta chamadas a métodos inexistentes, \
+tipos incompatíveis ou variáveis não definidas."""
+remediacao = "Corrigir os apontamentos e adicionar a análise estática ao CI."
+
+# ══════════════════════════════════════════════════════════════════
+#  MAPEAMENTO: ferramenta externa -> regra canônica
+#  Chave = "<ferramenta>:<id_nativo>"; o pipeline também aceita prefixo
+#  com '*' no fim para casar por família (ex.: "pylint:unused-*").
+# ══════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════
+#  SUPRESSÕES — falsos positivos de ferramenta, auditados um a um
+#
+#  As ferramentas genéricas não fazem análise de fluxo de dados. Quando o
+#  detector nativo do pipeline analisa um ponto e conclui que NÃO é
+#  vulnerabilidade, essa análise — mais precisa — precisa prevalecer sobre
+#  a da ferramenta. Sem isto, o falso positivo que removemos do detector
+#  nativo volta pela porta dos fundos via bandit.
+#
+#  Toda entrada exige justificativa escrita, e os achados suprimidos são
+#  REPORTADOS no JSON (`suppressed_findings`). Suprimir em silêncio seria
+#  indistinguível de não detectar — e daria para esconder achado
+#  inconveniente. Aqui, cada supressão é auditável.
+# ══════════════════════════════════════════════════════════════════
+
+[[suppressions]]
+rule_id = "SEC.SQLI"
+arquivo = "app/everything.py"
+linha = 205
+justificativa = """O bandit (B608) marca qualquer f-string contendo SQL. Aqui o \
+valor interpolado é `TABLE_MAP[thing]`, um dicionário CONSTANTE definido no módulo, \
+cujos valores são todos literais ('customers', 'users', 'billing_categories', \
+'billable_hours'). Um `thing` controlado pelo atacante produz KeyError, nunca SQL \
+arbitrário — o `id` já vai como parâmetro ligado. É código feio, não vulnerabilidade; \
+reportá-lo seria falso positivo."""
+
+[mapping]
+# ---- detector nativo Python (AST, sem dependência externa) ----
+"native-ast:sql-injection" = "SEC.SQLI"
+"native-ast:hardcoded-secret" = "SEC.HARDCODED_SECRET"
+"native-ast:default-password" = "SEC.DEFAULT_PASSWORD"
+"native-ast:weak-hash" = "SEC.WEAK_HASH"
+"native-ast:route-without-auth" = "SEC.NO_AUTHZ"
+"native-ast:debug-true" = "SEC.DEBUG_ON"
+"native-ast:xss-raw-html" = "SEC.XSS"
+"native-ast:select-star-sensitive" = "SEC.SENSITIVE_DATA_EXPOSURE"
+"native-ast:secret-in-log" = "SEC.SECRET_IN_LOG"
+"native-ast:committed-secret-file" = "SEC.COMMITTED_SECRET_FILE"
+"native-ast:unchecked-http-call" = "SEC.UNVERIFIED_REQUEST"
+"native-ast:n-plus-one" = "PERF.NPLUS1"
+"native-ast:swallowed-exception" = "DESIGN.SWALLOWED_EXCEPTION"
+"native-ast:missing-table-write" = "DESIGN.MISSING_TABLE"
+"native-ast:stringly-typed-dispatch" = "MAINT.STRINGLY_TYPED_DISPATCH"
+"native-ast:dead-variable" = "MAINT.DEAD_CODE"
+"native-ast:fixme" = "MAINT.FIXME"
+"native-ast:broad-except" = "MAINT.BROAD_EXCEPT"
+"native-ast:no-tests" = "ARCH.NO_TESTS"
+"native-ast:god-module" = "ARCH.GOD_MODULE"
+"native-ast:no-api-versioning" = "ARCH.NO_API_VERSIONING"
+"native-ast:cc-rank-C" = "MAINT.HIGH_COMPLEXITY"
+"native-ast:cc-rank-D" = "MAINT.HIGH_COMPLEXITY"
+"native-ast:cc-rank-E" = "MAINT.HIGH_COMPLEXITY"
+"native-ast:cc-rank-F" = "MAINT.HIGH_COMPLEXITY"
+
+# ---- detector nativo PHP (bônus) ----
+# Mesmos rule_id canônicos do Python: é exatamente isto que faz o scoring
+# model funcionar nas duas linguagens sem saber de qual veio o achado.
+"php-native:sql-injection" = "SEC.SQLI"
+"php-native:hardcoded-secret" = "SEC.HARDCODED_SECRET"
+"php-native:weak-hash" = "SEC.WEAK_HASH"
+"php-native:route-without-auth" = "SEC.NO_AUTHZ"
+"php-native:debug-true" = "SEC.DEBUG_ON"
+"php-native:xss-raw-html" = "SEC.XSS"
+"php-native:committed-secret-file" = "SEC.COMMITTED_SECRET_FILE"
+"php-native:swallowed-exception" = "DESIGN.SWALLOWED_EXCEPTION"
+"php-native:select-star-sensitive" = "SEC.SENSITIVE_DATA_EXPOSURE"
+"php-native:n-plus-one" = "PERF.NPLUS1"
+"php-native:fixme" = "MAINT.FIXME"
+"php-native:no-tests" = "ARCH.NO_TESTS"
+"php-native:god-module" = "ARCH.GOD_MODULE"
+"php-native:cc-rank-C" = "MAINT.HIGH_COMPLEXITY"
+"php-native:cc-rank-D" = "MAINT.HIGH_COMPLEXITY"
+"php-native:cc-rank-E" = "MAINT.HIGH_COMPLEXITY"
+"php-native:cc-rank-F" = "MAINT.HIGH_COMPLEXITY"
+"phpstan:phpstan-error" = "MAINT.TYPE_ERROR"
+
+# ---- bandit (segurança Python) ----
+"bandit:B105" = "SEC.HARDCODED_SECRET"   # hardcoded_password_string
+"bandit:B106" = "SEC.HARDCODED_SECRET"   # hardcoded_password_funcarg
+"bandit:B107" = "SEC.HARDCODED_SECRET"   # hardcoded_password_default
+"bandit:B201" = "SEC.DEBUG_ON"           # flask_debug_true
+"bandit:B303" = "SEC.WEAK_HASH"          # md5 (bandit legado)
+"bandit:B324" = "SEC.WEAK_HASH"          # hashlib insecure hash
+"bandit:B608" = "SEC.SQLI"               # hardcoded_sql_expressions
+"bandit:B310" = "SEC.UNVERIFIED_REQUEST"
+"bandit:B113" = "SEC.UNVERIFIED_REQUEST" # request sem timeout
+"bandit:B110" = "DESIGN.SWALLOWED_EXCEPTION"  # try_except_pass
+"bandit:B112" = "DESIGN.SWALLOWED_EXCEPTION"  # try_except_continue
+"bandit:B501" = "SEC.UNVERIFIED_REQUEST" # verify=False
+
+# ---- pylint ----
+"pylint:unused-variable" = "MAINT.DEAD_CODE"
+"pylint:unused-import" = "MAINT.LINT_SMELL"
+"pylint:fixme" = "MAINT.FIXME"
+"pylint:broad-exception-caught" = "MAINT.BROAD_EXCEPT"
+"pylint:broad-except" = "MAINT.BROAD_EXCEPT"
+"pylint:too-many-branches" = "MAINT.HIGH_COMPLEXITY"
+"pylint:too-many-statements" = "MAINT.HIGH_COMPLEXITY"
+"pylint:too-many-return-statements" = "MAINT.HIGH_COMPLEXITY"
+"pylint:duplicate-code" = "DESIGN.DUPLICATED_LOGIC"
+"pylint:no-member" = "MAINT.TYPE_ERROR"
+"pylint:undefined-variable" = "MAINT.TYPE_ERROR"
+"pylint:used-before-assignment" = "MAINT.TYPE_ERROR"
+"pylint:inconsistent-return-statements" = "DESIGN.SILENT_FAILURE"
+
+# ---- radon (complexidade) ----
+"radon:cc-rank-C" = "MAINT.HIGH_COMPLEXITY"
+"radon:cc-rank-D" = "MAINT.HIGH_COMPLEXITY"
+"radon:cc-rank-E" = "MAINT.HIGH_COMPLEXITY"
+"radon:cc-rank-F" = "MAINT.HIGH_COMPLEXITY"
+
+# ---- semgrep ----
+"semgrep:*formatted-sql-query*" = "SEC.SQLI"
+"semgrep:*sqlalchemy*injection*" = "SEC.SQLI"
+"semgrep:*hardcoded*" = "SEC.HARDCODED_SECRET"
+"semgrep:*insecure-hash*" = "SEC.WEAK_HASH"
+"semgrep:*md5*" = "SEC.WEAK_HASH"
+"semgrep:*debug-enabled*" = "SEC.DEBUG_ON"
+"semgrep:*xss*" = "SEC.XSS"
+"semgrep:*audit.*" = "MAINT.LINT_SMELL"
+
+# ---- phpstan (bônus) ----
+"phpstan:*" = "MAINT.TYPE_ERROR"
+
+# ---- phpmetrics / phploc (bônus) ----
+"phpmetrics:cc-high" = "MAINT.HIGH_COMPLEXITY"
+"phploc:cc-high" = "MAINT.HIGH_COMPLEXITY"
